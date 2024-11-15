@@ -132,7 +132,11 @@ impl State {
         // The instance is a handle to our GPU
         // Backends::all => Vulkan + Metal + DX12 + Browser WebGPU
         let instance = wgpu::Instance::new(wgpu::InstanceDescriptor {
-            backends: wgpu::Backends::VULKAN | wgpu::Backends::METAL,
+            backends: if cfg!(target_os = "macos") {
+                wgpu::Backends::METAL
+            } else {
+                wgpu::Backends::all()
+            },
             dx12_shader_compiler: Default::default(),
         });
 
@@ -154,20 +158,22 @@ impl State {
         let (device, queue) = adapter
             .request_device(
                 &wgpu::DeviceDescriptor {
-                    features: wgpu::Features::CONSERVATIVE_RASTERIZATION,
-                    // WebGL doesn't support all of wgpu's features, so if
-                    // we're building for the web we'll have to disable some.
-                    limits: if cfg!(target_arch = "wasm32") {
-                        wgpu::Limits::downlevel_webgl2_defaults()
+                    label: None,
+                    features: if cfg!(target_os = "macos") {
+                        wgpu::Features::empty()
+                    } else {
+                        wgpu::Features::CONSERVATIVE_RASTERIZATION
+                    },
+                    limits: if cfg!(target_os = "macos") {
+                        wgpu::Limits::downlevel_defaults()
                     } else {
                         wgpu::Limits::default()
                     },
-                    label: None,
                 },
-                None, // Trace path
+                None,
             )
             .await
-            .unwrap();
+            .expect("Failed to create device");
 
         let surface_caps = surface.get_capabilities(&adapter);
         // Shader code assumes an sRGB surface texture. Using a different
@@ -262,7 +268,7 @@ impl State {
             primitive: wgpu::PrimitiveState {
                 topology: wgpu::PrimitiveTopology::TriangleStrip,
                 front_face: wgpu::FrontFace::Ccw,
-                conservative: true,
+                conservative: !cfg!(target_os = "macos"),
                 ..Default::default()
             },
             depth_stencil: None,
@@ -342,12 +348,9 @@ impl State {
                     strip_index_format: None,
                     front_face: wgpu::FrontFace::Ccw,
                     cull_mode: Some(wgpu::Face::Back),
-                    // Setting this to anything other than Fill requires Features::NON_FILL_POLYGON_MODE
                     polygon_mode: wgpu::PolygonMode::Fill,
-                    // Requires Features::DEPTH_CLIP_CONTROL
                     unclipped_depth: false,
-                    // Requires Features::CONSERVATIVE_RASTERIZATION
-                    conservative: true,
+                    conservative: !cfg!(target_os = "macos"),
                 },
                 depth_stencil: None, // 1.
                 multisample: wgpu::MultisampleState {
